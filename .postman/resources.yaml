@@ -1,0 +1,13 @@
+# Use this workspace to collaborate
+workspace:
+  id: d6ecf929-1dc8-4b37-8176-6bd18a6918ac
+
+localResources:
+  collections:
+    - ../URL Shortener API.postman_collection.json
+
+# Each entry here maps a local resource to one or more corresponding objects in Postman Cloud
+
+cloudResources:
+  collections:
+    ../postman/collections/URL Shortener API: dcf0251a-b8a9-4bc7-bad9-3e8af0c169bf

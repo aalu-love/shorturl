@@ -1,0 +1,4098 @@
+{
+  "info": {
+    "_postman_id": "8cc321dc-a910-4f5d-9b5b-668fb1cb52c7",
+    "name": "URL Shortener API",
+    "description": "Production-grade URL Shortener REST API with comprehensive testing.\n\n## Quick Start\n\n**Base URL:** `http://localhost`\n\n## Auth Methods (choose one)\n\n1. **JWT Token** (recommended for web apps)\n   ```\n   Authorization: Bearer {{jwt_token}}\n   ```\n\n2. **API Key Header** (for backend services)\n   ```\n   X-API-Key: {{api_key}}\n   ```\n\n3. **API Key Query Param** (fallback)\n   ```\n   ?api_key={{api_key}}\n   ```\n\n## Workflow\n\n1. Run **Register** to create account (auto-saves token + api_key)\n2. Run **Shorten URL (authenticated)** to create a short URL\n3. Run **Follow Short URL** with the returned short_code\n4. Check **URL Stats** for analytics\n\n## Features\n- Read replica fallback for analytics queries\n- Cache stampede protection with mutex locks\n- Async analytics recording (never delays redirects)\n- LFU cache eviction (keeps hot URLs in memory)\n- Soft deletes (maintains analytics history)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "57905509"
+  },
+  "item": [
+    {
+      "name": "Health & Connectivity",
+      "item": [
+        {
+          "name": "Health Check",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function() {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response is valid JSON', function() {",
+                  "  const res = pm.response.json();",
+                  "  pm.expect(res).to.have.property('status');",
+                  "  pm.expect(res).to.have.property('uptime');",
+                  "  pm.expect(res).to.have.property('timestamp');",
+                  "});",
+                  "",
+                  "pm.test('Server is running', function() {",
+                  "  const res = pm.response.json();",
+                  "  pm.expect(res.status).to.equal('ok');",
+                  "  pm.expect(res.uptime).to.be.a('number');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "health"
+              ]
+            },
+            "description": "Verify server is running and responsive. No auth required."
+          },
+          "response": [
+            {
+              "name": "Health Check",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/health",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "health"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "content-security-policy",
+                  "value": "default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';img-src 'self' data:;object-src 'none';script-src 'self';script-src-attr 'none';style-src 'self' https: 'unsafe-inline';upgrade-insecure-requests"
+                },
+                {
+                  "key": "cross-origin-opener-policy",
+                  "value": "same-origin"
+                },
+                {
+                  "key": "cross-origin-resource-policy",
+                  "value": "same-origin"
+                },
+                {
+                  "key": "origin-agent-cluster",
+                  "value": "?1"
+                },
+                {
+                  "key": "referrer-policy",
+                  "value": "no-referrer"
+                },
+                {
+                  "key": "strict-transport-security",
+                  "value": "max-age=15552000; includeSubDomains"
+                },
+                {
+                  "key": "x-content-type-options",
+                  "value": "nosniff"
+                },
+                {
+                  "key": "x-dns-prefetch-control",
+                  "value": "off"
+                },
+                {
+                  "key": "x-download-options",
+                  "value": "noopen"
+                },
+                {
+                  "key": "x-frame-options",
+                  "value": "SAMEORIGIN"
+                },
+                {
+                  "key": "x-permitted-cross-domain-policies",
+                  "value": "none"
+                },
+                {
+                  "key": "x-xss-protection",
+                  "value": "0"
+                },
+                {
+                  "key": "vary",
+                  "value": "Origin, Accept-Encoding"
+                },
+                {
+                  "key": "access-control-allow-credentials",
+                  "value": "true"
+                },
+                {
+                  "key": "content-type",
+                  "value": "application/json; charset=utf-8"
+                },
+                {
+                  "key": "content-length",
+                  "value": "73"
+                },
+                {
+                  "key": "etag",
+                  "value": "W/\"49-MtWsdW/dwgqrPGn66sQNCHfR0WI\""
+                },
+                {
+                  "key": "date",
+                  "value": "Wed, 02 Sep 2026 13:53:49 GMT"
+                },
+                {
+                  "key": "connection",
+                  "value": "keep-alive"
+                },
+                {
+                  "key": "keep-alive",
+                  "value": "timeout=5"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"status\": \"ok\",\n  \"uptime\": 5.2151018,\n  \"timestamp\": \"2026-09-02T13:53:49.895Z\"\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Authentication",
+      "item": [
+        {
+          "name": "Register",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 201', function() {\n  pm.response.to.have.status(201);\n});\n\nconst res = pm.response.json();\n\npm.test('Response has success flag', function() {\n  pm.expect(res.success).to.be.true;\n});\n\npm.test('Response contains user data', function() {\n  pm.expect(res.data).to.have.property('user');\n  pm.expect(res.data.user).to.have.property('id');\n  pm.expect(res.data.user).to.have.property('email');\n  pm.expect(res.data.user).to.have.property('api_key');\n});\n\npm.test('Response contains JWT token', function() {\n  pm.expect(res.data).to.have.property('access_token');\n  pm.expect(res.data.access_token).to.be.a('string');\n  pm.expect(res.data.access_token.length).to.be.above(0);\n});\n\npm.test('API key starts with sk_', function() {\n  pm.expect(res.data.user.api_key).to.match(/^sk_/);\n});\n\n// Auto-save credentials for subsequent requests\nif (res.success) {\n  pm.collectionVariables.set('jwt_token', res.data.access_token);\n  pm.collectionVariables.set('api_key', res.data.user.api_key);\n  pm.collectionVariables.set('user_id', res.data.user.id);\n  console.log('✓ Credentials saved to collection variables');\n}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user+{{$timestamp}}@example.com\",\n  \"password\": \"SecurePass123!\",\n  \"name\": \"Test User\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{api_url}}/auth/register",
+              "host": [
+                "{{api_url}}"
+              ],
+              "path": [
+                "auth",
+                "register"
+              ]
+            },
+            "description": "Create account with unique email. Response auto-saves JWT token and API key to collection variables.\n\n✓ Returns 201 Created\n✓ Returns JWT token for Bearer auth\n✓ Returns API key for API Key auth"
+          },
+          "response": [
+            {
+              "name": "Register",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"user+{{$timestamp}}@example.com\",\n  \"password\": \"SecurePass123!\",\n  \"name\": \"Test User\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{api_url}}/auth/register",
+                  "host": [
+                    "{{api_url}}"
+                  ],
+                  "path": [
+                    "auth",
+                    "register"
+                  ]
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "content-security-policy",
+                  "value": "default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';img-src 'self' data:;object-src 'none';script-src 'self';script-src-attr 'none';style-src 'self' https: 'unsafe-inline';upgrade-insecure-requests"
+                },
+                {
+                  "key": "cross-origin-opener-policy",
+                  "value": "same-origin"
+                },
+                {
+                  "key": "cross-origin-resource-policy",
+                  "value": "same-origin"
+                },
+                {
+                  "key": "origin-agent-cluster",
+                  "value": "?1"
+                },
+                {
+                  "key": "referrer-policy",
+                  "value": "no-referrer"
+                },
+                {
+                  "key": "strict-transport-security",
+                  "value": "max-age=15552000; includeSubDomains"
+                },
+                {
+                  "key": "x-content-type-options",
+                  "value": "nosniff"
+                },
+                {
+                  "key": "x-dns-prefetch-control",
+                  "value": "off"
+                },
+                {
+                  "key": "x-download-options",
+                  "value": "noopen"
+                },
+                {
+                  "key": "x-frame-options",
+                  "value": "SAMEORIGIN"
+                },
+                {
+                  "key": "x-permitted-cross-domain-policies",
+                  "value": "none"
+                },
+                {
+                  "key": "x-xss-protection",
+                  "value": "0"
+                },
+                {
+                  "key": "vary",
+                  "value": "Origin, Accept-Encoding"
+                },
+                {
+                  "key": "access-control-allow-credentials",
+                  "value": "true"
+                },
+                {
+                  "key": "ratelimit-policy",
+                  "value": "10;w=900"
+                },
+                {
+                  "key": "ratelimit-limit",
+                  "value": "10"
+                },
+                {
+                  "key": "ratelimit-remaining",
+                  "value": "9"
+                },
+                {
+                  "key": "ratelimit-reset",
+                  "value": "900"
+                },
+                {
+                  "key": "content-type",
+                  "value": "application/json; charset=utf-8"
+                },
+                {
+                  "key": "content-length",
+                  "value": "479"
+                },
+                {
+                  "key": "etag",
+                  "value": "W/\"1df-DMsGXPjxAYQN/kPCKLAeuZaj3CU\""
+                },
+                {
+                  "key": "date",
+                  "value": "Wed, 02 Sep 2026 13:54:01 GMT"
+                },
+                {
+                  "key": "connection",
+                  "value": "keep-alive"
+                },
+                {
+                  "key": "keep-alive",
+                  "value": "timeout=5"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"user\": {\n      \"id\": \"10\",\n      \"email\": \"user+1788357241@example.com\",\n      \"name\": \"Test User\",\n      \"api_key\": \"sk_0eba576097734e4eae1a45d1cc882d86\",\n      \"role_id\": \"2\",\n      \"created_at\": \"2026-09-02T13:54:01.856Z\"\n    },\n    \"access_token\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMCIsImlhdCI6MTc4ODM1NzI0MSwiZXhwIjoxNzg4OTYyMDQxfQ.KGH-gdILzNaqhdYa2ExpLAhTEivRLaxZUzJShFulXks\",\n    \"refresh_token\": \"ed0c85babb76a5b30d58b12eb4264cbf94ca405e1afcd889c23561d436e7c27dbe9df99c35a4b8831ec116c8829566dd\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 429 Too Many Requests', function() {\n  pm.response.to.have.status(429);\n});\n\nconst res = pm.response.json();\n\npm.test('Login successful with valid credentials', function() {\n  pm.expect(res.success).to.be.true;\n  pm.expect(res.data).to.have.property('access_token');\n});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user+1788352404@example.com\",\n  \"password\": \"SecurePass123!\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{api_url}}/auth/login",
+              "host": [
+                "{{api_url}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Authenticate existing user. Returns fresh JWT token and API key.\n\n**Note:** Use the email from Register response for testing."
+          },
+          "response": [
+            {
+              "name": "Login",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"user+1788352404@example.com\",\n  \"password\": \"SecurePass123!\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{api_url}}/auth/login",
+                  "host": [
+                    "{{api_url}}"
+                  ],
+                  "path": [
+                    "auth",
+                    "login"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "content-security-policy",
+                  "value": "default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';img-src 'self' data:;object-src 'none';script-src 'self';script-src-attr 'none';style-src 'self' https: 'unsafe-inline';upgrade-insecure-requests"
+                },
+                {
+                  "key": "cross-origin-opener-policy",
+                  "value": "same-origin"
+                },
+                {
+                  "key": "cross-origin-resource-policy",
+                  "value": "same-origin"
+                },
+                {
+                  "key": "origin-agent-cluster",
+                  "value": "?1"
+                },
+                {
+                  "key": "referrer-policy",
+                  "value": "no-referrer"
+                },
+                {
+                  "key": "strict-transport-security",
+                  "value": "max-age=15552000; includeSubDomains"
+                },
+                {
+                  "key": "x-content-type-options",
+                  "value": "nosniff"
+                },
+                {
+                  "key": "x-dns-prefetch-control",
+                  "value": "off"
+                },
+                {
+                  "key": "x-download-options",
+                  "value": "noopen"
+                },
+                {
+                  "key": "x-frame-options",
+                  "value": "SAMEORIGIN"
+                },
+                {
+                  "key": "x-permitted-cross-domain-policies",
+                  "value": "none"
+                },
+                {
+                  "key": "x-xss-protection",
+                  "value": "0"
+                },
+                {
+                  "key": "vary",
+                  "value": "Origin, Accept-Encoding"
+                },
+                {
+                  "key": "access-control-allow-credentials",
+                  "value": "true"
+                },
+                {
+                  "key": "ratelimit-policy",
+                  "value": "10;w=900"
+                },
+                {
+                  "key": "ratelimit-limit",
+                  "value": "10"
+                },
+                {
+                  "key": "ratelimit-remaining",
+                  "value": "8"
+                },
+                {
+                  "key": "ratelimit-reset",
+                  "value": "878"
+                },
+                {
+                  "key": "content-type",
+                  "value": "application/json; charset=utf-8"
+                },
+                {
+                  "key": "content-length",
+                  "value": "453"
+                },
+                {
+                  "key": "etag",
+                  "value": "W/\"1c5-J8h/4uoH9z7vmweXjJ4oRbvm/Mo\""
+                },
+                {
+                  "key": "date",
+                  "value": "Wed, 02 Sep 2026 13:54:23 GMT"
+                },
+                {
+                  "key": "connection",
+                  "value": "keep-alive"
+                },
+                {
+                  "key": "keep-alive",
+                  "value": "timeout=5"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"user\": {\n      \"id\": \"4\",\n      \"email\": \"user+1788352404@example.com\",\n      \"name\": \"Test User\",\n      \"api_key\": \"sk_ef623cbcba4d432dbcfda095b2ebe9ac\",\n      \"role\": \"user\",\n      \"is_active\": true\n    },\n    \"access_token\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI0IiwiaWF0IjoxNzg4MzU3MjYzLCJleHAiOjE3ODg5NjIwNjN9.t26gOdW3q6ZJQvKhqMwQi9FHSdin2H-THp2sbSE-J0c\",\n    \"refresh_token\": \"ebf174c924db59150befa0fd8de18b41ef756c75216e7767ca6fb0a4c2f035b15cf37bff03ae3f75803d193a6f1d35bb\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Current User (JWT Auth)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function() {\n  pm.response.to.have.status(200);\n});\n\nconst res = pm.response.json();\n\npm.test('Returns authenticated user', function() {\n  pm.expect(res.success).to.be.true;\n  pm.expect(res.data.user).to.have.property('id');\n  pm.expect(res.data.user).to.have.property('email');\n  pm.expect(res.data.user).to.have.property('name');\n  pm.expect(res.data.user).to.have.property('created_at');\n});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{api_url}}/auth/me",
+              "host": [
+                "{{api_url}}"
+              ],
+              "path": [
+                "auth",
+                "me"
+              ]
+            },
+            "description": "Get profile of current authenticated user using JWT token.\n\nDemonstrates JWT authentication method."
+          },
+          "response": [
+            {
+              "name": "Get Current User (JWT Auth)",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{jwt_token}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{api_url}}/auth/me",
+                  "host": [
+                    "{{api_url}}"
+                  ],
+                  "path": [
+                    "auth",
+                    "me"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "content-security-policy",
+                  "value": "default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';img-src 'self' data:;object-src 'none';script-src 'self';script-src-attr 'none';style-src 'self' https: 'unsafe-inline';upgrade-insecure-requests"
+                },
+                {
+                  "key": "cross-origin-opener-policy",
+                  "value": "same-origin"
+                },
+                {
+                  "key": "cross-origin-resource-policy",
+                  "value": "same-origin"
+                },
+                {
+                  "key": "origin-agent-cluster",
+                  "value": "?1"
+                },
+                {
+                  "key": "referrer-policy",
+                  "value": "no-referrer"
+                },
+                {
+                  "key": "strict-transport-security",
+                  "value": "max-age=15552000; includeSubDomains"
+                },
+                {
+                  "key": "x-content-type-options",
+                  "value": "nosniff"
+                },
+                {
+                  "key": "x-dns-prefetch-control",
+                  "value": "off"
+                },
+                {
+                  "key": "x-download-options",
+                  "value": "noopen"
+                },
+                {
+                  "key": "x-frame-options",
+                  "value": "SAMEORIGIN"
+                },
+                {
+                  "key": "x-permitted-cross-domain-policies",
+                  "value": "none"
+                },
+                {
+                  "key": "x-xss-protection",
+                  "value": "0"
+                },
+                {
+                  "key": "vary",
+                  "value": "Origin, Accept-Encoding"
+                },
+                {
+                  "key": "access-control-allow-credentials",
+                  "value": "true"
+                },
+                {
+                  "key": "content-type",
+                  "value": "application/json; charset=utf-8"
+                },
+                {
+                  "key": "content-length",
+                  "value": "273"
+                },
+                {
+                  "key": "etag",
+                  "value": "W/\"111-tp965vfIIiMuPHUFmMhOwjCcvwQ\""
+                },
+                {
+                  "key": "date",
+                  "value": "Wed, 02 Sep 2026 13:54:36 GMT"
+                },
+                {
+                  "key": "connection",
+                  "value": "keep-alive"
+                },
+                {
+                  "key": "keep-alive",
+                  "value": "timeout=5"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"user\": {\n      \"id\": \"10\",\n      \"email\": \"user+1788357241@example.com\",\n      \"name\": \"Test User\",\n      \"api_key\": \"sk_0eba576097734e4eae1a45d1cc882d86\",\n      \"role_id\": \"2\",\n      \"is_active\": true,\n      \"created_at\": \"2026-09-02T13:54:01.856Z\",\n      \"role_name\": \"user\",\n      \"role_description\": \"Regular user\"\n    }\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Current User (API Key Header)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function() {\n  pm.response.to.have.status(200);\n});\n\nconst res = pm.response.json();\npm.test('Returns same user with API Key auth', function() {\n  pm.expect(res.success).to.be.true;\n  pm.expect(res.data.user).to.have.property('id');\n});\n"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{api_key}}"
+              }
+            ],
+            "url": {
+              "raw": "{{api_url}}/auth/me",
+              "host": [
+                "{{api_url}}"
+              ],
+              "path": [
+                "auth",
+                "me"
+              ]
+            },
+            "description": "Get profile using API Key header authentication.\n\nDemonstrates alternative API Key auth method."
+          },
+          "response": [
+            {
+              "name": "Get Current User (API Key Header)",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-API-Key",
+                    "value": "{{api_key}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{api_url}}/auth/me",
+                  "host": [
+                    "{{api_url}}"
+                  ],
+                  "path": [
+                    "auth",
+                    "me"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "content-security-policy",
+                  "value": "default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';img-src 'self' data:;object-src 'none';script-src 'self';script-src-attr 'none';style-src 'self' https: 'unsafe-inline';upgrade-insecure-requests"
+                },
+                {
+                  "key": "cross-origin-opener-policy",
+                  "value": "same-origin"
+                },
+                {
+                  "key": "cross-origin-resource-policy",
+                  "value": "same-origin"
+                },
+                {
+                  "key": "origin-agent-cluster",
+                  "value": "?1"
+                },
+                {
+                  "key": "referrer-policy",
+                  "value": "no-referrer"
+                },
+                {
+                  "key": "strict-transport-security",
+                  "value": "max-age=15552000; includeSubDomains"
+                },
+                {
+                  "key": "x-content-type-options",
+                  "value": "nosniff"
+                },
+                {
+                  "key": "x-dns-prefetch-control",
+                  "value": "off"
+                },
+                {
+                  "key": "x-download-options",
+                  "value": "noopen"
+                },
+                {
+                  "key": "x-frame-options",
+                  "value": "SAMEORIGIN"
+                },
+                {
+                  "key": "x-permitted-cross-domain-policies",
+                  "value": "none"
+                },
+                {
+                  "key": "x-xss-protection",
+                  "value": "0"
+                },
+                {
+                  "key": "vary",
+                  "value": "Origin, Accept-Encoding"
+                },
+                {
+                  "key": "access-control-allow-credentials",
+                  "value": "true"
+                },
+                {
+                  "key": "content-type",
+                  "value": "application/json; charset=utf-8"
+                },
+                {
+                  "key": "content-length",
+                  "value": "273"
+                },
+                {
+                  "key": "etag",
+                  "value": "W/\"111-tp965vfIIiMuPHUFmMhOwjCcvwQ\""
+                },
+                {
+                  "key": "date",
+                  "value": "Wed, 02 Sep 2026 13:55:34 GMT"
+                },
+                {
+                  "key": "connection",
+                  "value": "keep-alive"
+                },
+                {
+                  "key": "keep-alive",
+                  "value": "timeout=5"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"user\": {\n      \"id\": \"10\",\n      \"email\": \"user+1788357241@example.com\",\n      \"name\": \"Test User\",\n      \"api_key\": \"sk_0eba576097734e4eae1a45d1cc882d86\",\n      \"role_id\": \"2\",\n      \"is_active\": true,\n      \"created_at\": \"2026-09-02T13:54:01.856Z\",\n      \"role_name\": \"user\",\n      \"role_description\": \"Regular user\"\n    }\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Current User (API Key Query Param)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function() {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "const res = pm.response.json();",
+                  "pm.test('Returns user with query param API Key', function() {",
+                  "  pm.expect(res.success).to.be.true;",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{api_url}}/auth/me?api_key={{api_key}}",
+              "host": [
+                "{{api_url}}"
+              ],
+              "path": [
+                "auth",
+                "me"
+              ],
+              "query": [
+                {
+                  "key": "api_key",
+                  "value": "{{api_key}}"
+                }
+              ]
+            },
+            "description": "Get profile using API Key as query parameter.\n\nFallback method for situations where headers can't be set."
+          },
+          "response": [
+            {
+              "name": "Get Current User (API Key Query Param)",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{api_url}}/auth/me?api_key={{api_key}}",
+                  "host": [
+                    "{{api_url}}"
+                  ],
+                  "path": [
+                    "auth",
+                    "me"
+                  ],
+                  "query": [
+                    {
+                      "key": "api_key",
+                      "value": "{{api_key}}"
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "content-security-policy",
+                  "value": "default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';img-src 'self' data:;object-src 'none';script-src 'self';script-src-attr 'none';style-src 'self' https: 'unsafe-inline';upgrade-insecure-requests"
+                },
+                {
+                  "key": "cross-origin-opener-policy",
+                  "value": "same-origin"
+                },
+                {
+                  "key": "cross-origin-resource-policy",
+                  "value": "same-origin"
+                },
+                {
+                  "key": "origin-agent-cluster",
+                  "value": "?1"
+                },
+                {
+                  "key": "referrer-policy",
+                  "value": "no-referrer"
+                },
+                {
+                  "key": "strict-transport-security",
+                  "value": "max-age=15552000; includeSubDomains"
+                },
+                {
+                  "key": "x-content-type-options",
+                  "value": "nosniff"
+                },
+                {
+                  "key": "x-dns-prefetch-control",
+                  "value": "off"
+                },
+                {
+                  "key": "x-download-options",
+                  "value": "noopen"
+                },
+                {
+                  "key": "x-frame-options",
+                  "value": "SAMEORIGIN"
+                },
+                {
+                  "key": "x-permitted-cross-domain-policies",
+                  "value": "none"
+                },
+                {
+                  "key": "x-xss-protection",
+                  "value": "0"
+                },
+                {
+                  "key": "vary",
+                  "value": "Origin, Accept-Encoding"
+                },
+                {
+                  "key": "access-control-allow-credentials",
+                  "value": "true"
+                },
+                {
+                  "key": "content-type",
+                  "value": "application/json; charset=utf-8"
+                },
+                {
+                  "key": "content-length",
+                  "value": "273"
+                },
+                {
+                  "key": "etag",
+                  "value": "W/\"111-tp965vfIIiMuPHUFmMhOwjCcvwQ\""
+                },
+                {
+                  "key": "date",
+                  "value": "Wed, 02 Sep 2026 13:55:39 GMT"
+                },
+                {
+                  "key": "connection",
+                  "value": "keep-alive"
+                },
+                {
+                  "key": "keep-alive",
+                  "value": "timeout=5"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"user\": {\n      \"id\": \"10\",\n      \"email\": \"user+1788357241@example.com\",\n      \"name\": \"Test User\",\n      \"api_key\": \"sk_0eba576097734e4eae1a45d1cc882d86\",\n      \"role_id\": \"2\",\n      \"is_active\": true,\n      \"created_at\": \"2026-09-02T13:54:01.856Z\",\n      \"role_name\": \"user\",\n      \"role_description\": \"Regular user\"\n    }\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Rotate API Key",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function() {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "const res = pm.response.json();",
+                  "",
+                  "pm.test('Old key invalidated, new key issued', function() {",
+                  "  pm.expect(res.success).to.be.true;",
+                  "  pm.expect(res.data).to.have.property('api_key');",
+                  "  pm.expect(res.data.api_key).to.match(/^sk_/);",
+                  "});",
+                  "",
+                  "// Update to new API key",
+                  "if (res.success) {",
+                  "  const oldKey = pm.collectionVariables.get('api_key');",
+                  "  const newKey = res.data.api_key;",
+                  "  pm.collectionVariables.set('api_key', newKey);",
+                  "  console.log('✓ API key rotated and updated');",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{api_url}}/auth/api-key/rotate",
+              "host": [
+                "{{api_url}}"
+              ],
+              "path": [
+                "auth",
+                "api-key",
+                "rotate"
+              ]
+            },
+            "description": "Invalidate current API key and issue new one.\n\n✓ Old key is immediately evicted from Redis cache\n✓ Subsequent requests with old key will fail\n✓ Response auto-updates collection variable"
+          },
+          "response": [
+            {
+              "name": "Rotate API Key",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{jwt_token}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{api_url}}/auth/api-key/rotate",
+                  "host": [
+                    "{{api_url}}"
+                  ],
+                  "path": [
+                    "auth",
+                    "api-key",
+                    "rotate"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "content-security-policy",
+                  "value": "default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';img-src 'self' data:;object-src 'none';script-src 'self';script-src-attr 'none';style-src 'self' https: 'unsafe-inline';upgrade-insecure-requests"
+                },
+                {
+                  "key": "cross-origin-opener-policy",
+                  "value": "same-origin"
+                },
+                {
+                  "key": "cross-origin-resource-policy",
+                  "value": "same-origin"
+                },
+                {
+                  "key": "origin-agent-cluster",
+                  "value": "?1"
+                },
+                {
+                  "key": "referrer-policy",
+                  "value": "no-referrer"
+                },
+                {
+                  "key": "strict-transport-security",
+                  "value": "max-age=15552000; includeSubDomains"
+                },
+                {
+                  "key": "x-content-type-options",
+                  "value": "nosniff"
+                },
+                {
+                  "key": "x-dns-prefetch-control",
+                  "value": "off"
+                },
+                {
+                  "key": "x-download-options",
+                  "value": "noopen"
+                },
+                {
+                  "key": "x-frame-options",
+                  "value": "SAMEORIGIN"
+                },
+                {
+                  "key": "x-permitted-cross-domain-policies",
+                  "value": "none"
+                },
+                {
+                  "key": "x-xss-protection",
+                  "value": "0"
+                },
+                {
+                  "key": "vary",
+                  "value": "Origin, Accept-Encoding"
+                },
+                {
+                  "key": "access-control-allow-credentials",
+                  "value": "true"
+                },
+                {
+                  "key": "content-type",
+                  "value": "application/json; charset=utf-8"
+                },
+                {
+                  "key": "content-length",
+                  "value": "73"
+                },
+                {
+                  "key": "etag",
+                  "value": "W/\"49-uEsH70DdEa2/zKG+JgY9j2QnPi0\""
+                },
+                {
+                  "key": "date",
+                  "value": "Wed, 02 Sep 2026 13:55:45 GMT"
+                },
+                {
+                  "key": "connection",
+                  "value": "keep-alive"
+                },
+                {
+                  "key": "keep-alive",
+                  "value": "timeout=5"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"api_key\": \"sk_ae9e34754632413dac12f1cffe35a368\"\n  }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "URL Shortening",
+      "item": [
+        {
+          "name": "Shorten URL (Authenticated)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 201', function() {\n  pm.response.to.have.status(201);\n});\n\nconst res = pm.response.json();\n\npm.test('Response contains short URL data', function() {\n  pm.expect(res.data).to.have.property('short_code');\n  pm.expect(res.data).to.have.property('short_url');\n  pm.expect(res.data).to.have.property('original_url');\n  pm.expect(res.data).to.have.property('created_at');\n});\n\npm.test('short_code is Base62 encoded', function() {\n  const code = res.data.short_code;\n  // Base62 contains alphanumeric: 0-9, a-z, A-Z\n  pm.expect(code).to.match(/^[0-9a-zA-Z]+$/);\n  pm.expect(code.length).to.be.above(0);\n});\n\npm.test('short_url is valid', function() {\n  pm.expect(res.data.short_url).to.include(res.data.short_code);\n  pm.expect(res.data.short_url).to.be.a('string');\n});\n\n// Save for analytics queries\nif (res.data) {\n  pm.collectionVariables.set('short_code', res.data.short_code);\n  console.log('✓ Short code saved:', res.data.short_code);\n}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"original_url\": \"https://www.example.com/some/very/long/url/that/needs/shortening?utm=campaign&ref=social\",\n  \"title\": \"Example Article\"\n}",
+              "options": {
+                "raw": {
+                  "language": "text"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{api_url}}/urls",
+              "host": [
+                "{{api_url}}"
+              ],
+              "path": [
+                "urls"
+              ]
+            },
+            "description": "Create short URL for authenticated user.\n\n✓ Returns Base62-encoded short_code (collision-free)\n✓ Pre-warms cache for instant redirects\n✓ Response auto-saves short_code for analytics queries"
+          },
+          "response": [
+            {
+              "name": "Shorten URL (Authenticated)",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{jwt_token}}"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"original_url\": \"https://www.example.com/some/very/long/url/that/needs/shortening?utm=campaign&ref=social\",\n  \"title\": \"Example Article\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "text"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{api_url}}/urls",
+                  "host": [
+                    "{{api_url}}"
+                  ],
+                  "path": [
+                    "urls"
+                  ]
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "content-security-policy",
+                  "value": "default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';img-src 'self' data:;object-src 'none';script-src 'self';script-src-attr 'none';style-src 'self' https: 'unsafe-inline';upgrade-insecure-requests"
+                },
+                {
+                  "key": "cross-origin-opener-policy",
+                  "value": "same-origin"
+                },
+                {
+                  "key": "cross-origin-resource-policy",
+                  "value": "same-origin"
+                },
+                {
+                  "key": "origin-agent-cluster",
+                  "value": "?1"
+                },
+                {
+                  "key": "referrer-policy",
+                  "value": "no-referrer"
+                },
+                {
+                  "key": "strict-transport-security",
+                  "value": "max-age=15552000; includeSubDomains"
+                },
+                {
+                  "key": "x-content-type-options",
+                  "value": "nosniff"
+                },
+                {
+                  "key": "x-dns-prefetch-control",
+                  "value": "off"
+                },
+                {
+                  "key": "x-download-options",
+                  "value": "noopen"
+                },
+                {
+                  "key": "x-frame-options",
+                  "value": "SAMEORIGIN"
+                },
+                {
+                  "key": "x-permitted-cross-domain-policies",
+                  "value": "none"
+                },
+                {
+                  "key": "x-xss-protection",
+                  "value": "0"
+                },
+                {
+                  "key": "vary",
+                  "value": "Origin, Accept-Encoding"
+                },
+                {
+                  "key": "access-control-allow-credentials",
+                  "value": "true"
+                },
+                {
+                  "key": "ratelimit-policy",
+                  "value": "100;w=900"
+                },
+                {
+                  "key": "ratelimit-limit",
+                  "value": "100"
+                },
+                {
+                  "key": "ratelimit-remaining",
+                  "value": "99"
+                },
+                {
+                  "key": "ratelimit-reset",
+                  "value": "900"
+                },
+                {
+                  "key": "content-type",
+                  "value": "application/json; charset=utf-8"
+                },
+                {
+                  "key": "content-length",
+                  "value": "328"
+                },
+                {
+                  "key": "etag",
+                  "value": "W/\"148-zt7wrKpFTQOL+CLYiYuYLV/h//I\""
+                },
+                {
+                  "key": "date",
+                  "value": "Wed, 02 Sep 2026 13:55:53 GMT"
+                },
+                {
+                  "key": "connection",
+                  "value": "keep-alive"
+                },
+                {
+                  "key": "keep-alive",
+                  "value": "timeout=5"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"id\": \"9\",\n    \"short_code\": \"0000009\",\n    \"original_url\": \"https://www.example.com/some/very/long/url/that/needs/shortening?utm=campaign&ref=social\",\n    \"user_id\": \"10\",\n    \"expires_at\": \"2026-09-03T13:55:53.892Z\",\n    \"title\": \"Example Article\",\n    \"created_at\": \"2026-09-02T13:55:53.895Z\",\n    \"short_url\": \"http://localhost:8080/0000009\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Shorten URL (Custom Code)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 201', function() {\n  pm.response.to.have.status(201);\n});\n\nconst res = pm.response.json();\n\npm.test('Custom code is returned', function() {\n  pm.expect(res.data.short_code).to.equal('github');\n});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"original_url\": \"https://google.com\",\n  \"custom_code\": \"google\",\n  \"title\": \"Google\",\n  \"expires_at\": \"2027-12-31T23:59:59Z\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{api_url}}/urls",
+              "host": [
+                "{{api_url}}"
+              ],
+              "path": [
+                "urls"
+              ]
+            },
+            "description": "Create short URL with custom code and expiration.\n\n✓ `custom_code` must be unique and alphanumeric\n✓ `expires_at` is optional (ISO 8601 timestamp)\n✓ Only authenticated users can set custom codes\n✓ Requires admin permissions if code is very short or popular"
+          },
+          "response": [
+            {
+              "name": "Shorten URL (Custom Code)",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{jwt_token}}"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"original_url\": \"https://google.com\",\n  \"custom_code\": \"google\",\n  \"title\": \"Google\",\n  \"expires_at\": \"2027-12-31T23:59:59Z\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{api_url}}/urls",
+                  "host": [
+                    "{{api_url}}"
+                  ],
+                  "path": [
+                    "urls"
+                  ]
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "content-security-policy",
+                  "value": "default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';img-src 'self' data:;object-src 'none';script-src 'self';script-src-attr 'none';style-src 'self' https: 'unsafe-inline';upgrade-insecure-requests"
+                },
+                {
+                  "key": "cross-origin-opener-policy",
+                  "value": "same-origin"
+                },
+                {
+                  "key": "cross-origin-resource-policy",
+                  "value": "same-origin"
+                },
+                {
+                  "key": "origin-agent-cluster",
+                  "value": "?1"
+                },
+                {
+                  "key": "referrer-policy",
+                  "value": "no-referrer"
+                },
+                {
+                  "key": "strict-transport-security",
+                  "value": "max-age=15552000; includeSubDomains"
+                },
+                {
+                  "key": "x-content-type-options",
+                  "value": "nosniff"
+                },
+                {
+                  "key": "x-dns-prefetch-control",
+                  "value": "off"
+                },
+                {
+                  "key": "x-download-options",
+                  "value": "noopen"
+                },
+                {
+                  "key": "x-frame-options",
+                  "value": "SAMEORIGIN"
+                },
+                {
+                  "key": "x-permitted-cross-domain-policies",
+                  "value": "none"
+                },
+                {
+                  "key": "x-xss-protection",
+                  "value": "0"
+                },
+                {
+                  "key": "vary",
+                  "value": "Origin, Accept-Encoding"
+                },
+                {
+                  "key": "access-control-allow-credentials",
+                  "value": "true"
+                },
+                {
+                  "key": "ratelimit-policy",
+                  "value": "100;w=900"
+                },
+                {
+                  "key": "ratelimit-limit",
+                  "value": "100"
+                },
+                {
+                  "key": "ratelimit-remaining",
+                  "value": "97"
+                },
+                {
+                  "key": "ratelimit-reset",
+                  "value": "867"
+                },
+                {
+                  "key": "content-type",
+                  "value": "application/json; charset=utf-8"
+                },
+                {
+                  "key": "content-length",
+                  "value": "248"
+                },
+                {
+                  "key": "etag",
+                  "value": "W/\"f8-WQAeMEXGEPn1Zyj4Ydjj9XOod5M\""
+                },
+                {
+                  "key": "date",
+                  "value": "Wed, 02 Sep 2026 13:56:27 GMT"
+                },
+                {
+                  "key": "connection",
+                  "value": "keep-alive"
+                },
+                {
+                  "key": "keep-alive",
+                  "value": "timeout=5"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"id\": \"10\",\n    \"short_code\": \"google\",\n    \"original_url\": \"https://google.com\",\n    \"user_id\": \"10\",\n    \"expires_at\": \"2027-12-31T23:59:59.000Z\",\n    \"title\": \"Google\",\n    \"created_at\": \"2026-09-02T13:56:27.020Z\",\n    \"short_url\": \"http://localhost:8080/google\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Shorten URL (Guest - No Auth)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 201', function() {",
+                  "  pm.response.to.have.status(201);",
+                  "});",
+                  "",
+                  "const res = pm.response.json();",
+                  "",
+                  "pm.test('Guest URLs work without auth', function() {",
+                  "  pm.expect(res.data).to.have.property('short_code');",
+                  "  pm.expect(res.data).to.have.property('short_url');",
+                  "});",
+                  "",
+                  "pm.test('Guest URLs have no custom_code option', function() {",
+                  "  // Cannot set custom_code as guest",
+                  "  pm.expect(res.data).not.to.have.property('custom_code');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"original_url\": \"https://www.example.com/guest-link\"\n}"
+            },
+            "url": {
+              "raw": "{{api_url}}/urls",
+              "host": [
+                "{{api_url}}"
+              ],
+              "path": [
+                "urls"
+              ]
+            },
+            "description": "Create short URL without authentication (guest mode).\n\n✓ No auth required\n✓ Auto-generated Base62 short_code only\n✓ No custom codes allowed\n✓ No analytics tracking (fire-and-forget)"
+          },
+          "response": [
+            {
+              "name": "Shorten URL (Guest - No Auth)",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"original_url\": \"https://www.example.com/guest-link\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "text"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{api_url}}/urls",
+                  "host": [
+                    "{{api_url}}"
+                  ],
+                  "path": [
+                    "urls"
+                  ]
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "content-security-policy",
+                  "value": "default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';img-src 'self' data:;object-src 'none';script-src 'self';script-src-attr 'none';style-src 'self' https: 'unsafe-inline';upgrade-insecure-requests"
+                },
+                {
+                  "key": "cross-origin-opener-policy",
+                  "value": "same-origin"
+                },
+                {
+                  "key": "cross-origin-resource-policy",
+                  "value": "same-origin"
+                },
+                {
+                  "key": "origin-agent-cluster",
+                  "value": "?1"
+                },
+                {
+                  "key": "referrer-policy",
+                  "value": "no-referrer"
+                },
+                {
+                  "key": "strict-transport-security",
+                  "value": "max-age=15552000; includeSubDomains"
+                },
+                {
+                  "key": "x-content-type-options",
+                  "value": "nosniff"
+                },
+                {
+                  "key": "x-dns-prefetch-control",
+                  "value": "off"
+                },
+                {
+                  "key": "x-download-options",
+                  "value": "noopen"
+                },
+                {
+                  "key": "x-frame-options",
+                  "value": "SAMEORIGIN"
+                },
+                {
+                  "key": "x-permitted-cross-domain-policies",
+                  "value": "none"
+                },
+                {
+                  "key": "x-xss-protection",
+                  "value": "0"
+                },
+                {
+                  "key": "vary",
+                  "value": "Origin, Accept-Encoding"
+                },
+                {
+                  "key": "access-control-allow-credentials",
+                  "value": "true"
+                },
+                {
+                  "key": "ratelimit-policy",
+                  "value": "100;w=900"
+                },
+                {
+                  "key": "ratelimit-limit",
+                  "value": "100"
+                },
+                {
+                  "key": "ratelimit-remaining",
+                  "value": "96"
+                },
+                {
+                  "key": "ratelimit-reset",
+                  "value": "858"
+                },
+                {
+                  "key": "content-type",
+                  "value": "application/json; charset=utf-8"
+                },
+                {
+                  "key": "content-length",
+                  "value": "262"
+                },
+                {
+                  "key": "etag",
+                  "value": "W/\"106-AF7tinNANg0McAo9x0em0McXg60\""
+                },
+                {
+                  "key": "date",
+                  "value": "Wed, 02 Sep 2026 13:56:36 GMT"
+                },
+                {
+                  "key": "connection",
+                  "value": "keep-alive"
+                },
+                {
+                  "key": "keep-alive",
+                  "value": "timeout=5"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"id\": \"11\",\n    \"short_code\": \"000000b\",\n    \"original_url\": \"https://www.example.com/guest-link\",\n    \"user_id\": null,\n    \"expires_at\": \"2026-09-03T13:56:36.249Z\",\n    \"title\": null,\n    \"created_at\": \"2026-09-02T13:56:36.259Z\",\n    \"short_url\": \"http://localhost:8080/000000b\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "List My URLs",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function() {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "const res = pm.response.json();",
+                  "",
+                  "pm.test('Returns paginated URL list', function() {",
+                  "  pm.expect(res.success).to.be.true;",
+                  "  pm.expect(res.data).to.have.property('urls');",
+                  "  pm.expect(res.data).to.have.property('total');",
+                  "  pm.expect(res.data).to.have.property('limit');",
+                  "  pm.expect(res.data).to.have.property('offset');",
+                  "});",
+                  "",
+                  "pm.test('Each URL has required fields', function() {",
+                  "  if (res.data.urls.length > 0) {",
+                  "    const url = res.data.urls[0];",
+                  "    pm.expect(url).to.have.property('id');",
+                  "    pm.expect(url).to.have.property('short_code');",
+                  "    pm.expect(url).to.have.property('original_url');",
+                  "    pm.expect(url).to.have.property('click_count');",
+                  "    pm.expect(url).to.have.property('created_at');",
+                  "  }",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{api_url}}/urls?limit=20&offset=0",
+              "host": [
+                "{{api_url}}"
+              ],
+              "path": [
+                "urls"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "description": "Max items per page"
+                },
+                {
+                  "key": "offset",
+                  "value": "0",
+                  "description": "Skip N items"
+                }
+              ]
+            },
+            "description": "List all short URLs created by authenticated user.\n\n✓ Paginated results (limit + offset)\n✓ Includes click_count for summary\n✓ Auth required"
+          },
+          "response": [
+            {
+              "name": "List My URLs",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{jwt_token}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{api_url}}/urls?limit=20&offset=0",
+                  "host": [
+                    "{{api_url}}"
+                  ],
+                  "path": [
+                    "urls"
+                  ],
+                  "query": [
+                    {
+                      "key": "limit",
+                      "value": "20",
+                      "description": "Max items per page"
+                    },
+                    {
+                      "key": "offset",
+                      "value": "0",
+                      "description": "Skip N items"
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "content-security-policy",
+                  "value": "default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';img-src 'self' data:;object-src 'none';script-src 'self';script-src-attr 'none';style-src 'self' https: 'unsafe-inline';upgrade-insecure-requests"
+                },
+                {
+                  "key": "cross-origin-opener-policy",
+                  "value": "same-origin"
+                },
+                {
+                  "key": "cross-origin-resource-policy",
+                  "value": "same-origin"
+                },
+                {
+                  "key": "origin-agent-cluster",
+                  "value": "?1"
+                },
+                {
+                  "key": "referrer-policy",
+                  "value": "no-referrer"
+                },
+                {
+                  "key": "strict-transport-security",
+                  "value": "max-age=15552000; includeSubDomains"
+                },
+                {
+                  "key": "x-content-type-options",
+                  "value": "nosniff"
+                },
+                {
+                  "key": "x-dns-prefetch-control",
+                  "value": "off"
+                },
+                {
+                  "key": "x-download-options",
+                  "value": "noopen"
+                },
+                {
+                  "key": "x-frame-options",
+                  "value": "SAMEORIGIN"
+                },
+                {
+                  "key": "x-permitted-cross-domain-policies",
+                  "value": "none"
+                },
+                {
+                  "key": "x-xss-protection",
+                  "value": "0"
+                },
+                {
+                  "key": "vary",
+                  "value": "Origin, Accept-Encoding"
+                },
+                {
+                  "key": "access-control-allow-credentials",
+                  "value": "true"
+                },
+                {
+                  "key": "content-type",
+                  "value": "application/json; charset=utf-8"
+                },
+                {
+                  "key": "content-length",
+                  "value": "602"
+                },
+                {
+                  "key": "etag",
+                  "value": "W/\"25a-7hOIn1LR3ru7IvjlYzHpFN1L22w\""
+                },
+                {
+                  "key": "date",
+                  "value": "Wed, 02 Sep 2026 13:56:44 GMT"
+                },
+                {
+                  "key": "connection",
+                  "value": "keep-alive"
+                },
+                {
+                  "key": "keep-alive",
+                  "value": "timeout=5"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"urls\": [\n      {\n        \"id\": \"10\",\n        \"short_code\": \"google\",\n        \"original_url\": \"https://google.com\",\n        \"title\": \"Google\",\n        \"expires_at\": \"2027-12-31T23:59:59.000Z\",\n        \"click_count\": \"0\",\n        \"created_at\": \"2026-09-02T13:56:27.020Z\",\n        \"short_url\": \"http://localhost:8080/google\"\n      },\n      {\n        \"id\": \"9\",\n        \"short_code\": \"0000009\",\n        \"original_url\": \"https://www.example.com/some/very/long/url/that/needs/shortening?utm=campaign&ref=social\",\n        \"title\": \"Example Article\",\n        \"expires_at\": \"2026-09-03T13:55:53.892Z\",\n        \"click_count\": \"0\",\n        \"created_at\": \"2026-09-02T13:55:53.895Z\",\n        \"short_url\": \"http://localhost:8080/0000009\"\n      }\n    ],\n    \"total\": 2,\n    \"limit\": 20,\n    \"offset\": 0\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Delete URL",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function() {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "const res = pm.response.json();",
+                  "",
+                  "pm.test('URL is soft-deleted', function() {",
+                  "  pm.expect(res.success).to.be.true;",
+                  "  pm.expect(res.message).to.include('deleted');",
+                  "});",
+                  "",
+                  "pm.test('Deleted URL evicted from cache', function() {",
+                  "  // Redis cache immediately cleared for this code",
+                  "  console.log('✓ Short code evicted from LFU cache');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{api_url}}/urls/{{short_code}}",
+              "host": [
+                "{{api_url}}"
+              ],
+              "path": [
+                "urls",
+                "{{short_code}}"
+              ]
+            },
+            "description": "Soft-delete a short URL (mark as inactive).\n\n✓ Sets is_active = false (preserves analytics history)\n✓ URL no longer redirects (404 on access)\n✓ Immediately evicted from Redis LFU cache\n✓ Owner only (auth required)"
+          },
+          "response": [
+            {
+              "name": "Delete URL",
+              "originalRequest": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{jwt_token}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{api_url}}/urls/{{short_code}}",
+                  "host": [
+                    "{{api_url}}"
+                  ],
+                  "path": [
+                    "urls",
+                    "{{short_code}}"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "content-security-policy",
+                  "value": "default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';img-src 'self' data:;object-src 'none';script-src 'self';script-src-attr 'none';style-src 'self' https: 'unsafe-inline';upgrade-insecure-requests"
+                },
+                {
+                  "key": "cross-origin-opener-policy",
+                  "value": "same-origin"
+                },
+                {
+                  "key": "cross-origin-resource-policy",
+                  "value": "same-origin"
+                },
+                {
+                  "key": "origin-agent-cluster",
+                  "value": "?1"
+                },
+                {
+                  "key": "referrer-policy",
+                  "value": "no-referrer"
+                },
+                {
+                  "key": "strict-transport-security",
+                  "value": "max-age=15552000; includeSubDomains"
+                },
+                {
+                  "key": "x-content-type-options",
+                  "value": "nosniff"
+                },
+                {
+                  "key": "x-dns-prefetch-control",
+                  "value": "off"
+                },
+                {
+                  "key": "x-download-options",
+                  "value": "noopen"
+                },
+                {
+                  "key": "x-frame-options",
+                  "value": "SAMEORIGIN"
+                },
+                {
+                  "key": "x-permitted-cross-domain-policies",
+                  "value": "none"
+                },
+                {
+                  "key": "x-xss-protection",
+                  "value": "0"
+                },
+                {
+                  "key": "vary",
+                  "value": "Origin, Accept-Encoding"
+                },
+                {
+                  "key": "access-control-allow-credentials",
+                  "value": "true"
+                },
+                {
+                  "key": "content-type",
+                  "value": "application/json; charset=utf-8"
+                },
+                {
+                  "key": "content-length",
+                  "value": "40"
+                },
+                {
+                  "key": "etag",
+                  "value": "W/\"28-NE3tvEvD+rBY5Dy2+YOVYl6h1kU\""
+                },
+                {
+                  "key": "date",
+                  "value": "Wed, 02 Sep 2026 13:56:53 GMT"
+                },
+                {
+                  "key": "connection",
+                  "value": "keep-alive"
+                },
+                {
+                  "key": "keep-alive",
+                  "value": "timeout=5"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"message\": \"URL deleted\"\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Redirects (Hot Path)",
+      "item": [
+        {
+          "name": "Follow Short URL",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  ""
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 302 Found\", function () {\r\n    pm.response.to.have.status(302);\r\n});\r\n\r\npm.test(\"Response has Location header\", function () {\r\n    pm.response.to.have.header(\"Location\");\r\n});\r\n\r\npm.test(\"Location header is a valid URL\", function () {\r\n    const location = pm.response.headers.get(\"Location\");\r\n    pm.expect(location).to.match(/^https?:\\/\\/.+/);\r\n});\r\n\r\npm.test(\"Response time is within acceptable range\", function () {\r\n    pm.expect(pm.response.responseTime).to.be.below(500);\r\n});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/{{short_code}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "{{short_code}}"
+              ]
+            },
+            "description": "THE HOT PATH — Redirect to original URL.\n\n**Flow:**\n1. Redis LFU cache lookup (sub-millisecond if hit)\n2. Cache miss → acquire mutex lock\n3. Fetch from replica DB (fast read query)\n4. Populate cache for future requests\n5. Record click async (never delays redirect response)\n\n**Returns:** HTTP 302 with Location header\n\n**Performance:**\n- Cache hit: <1ms\n- Cache miss: ~5ms (DB query + mutex)\n\n**Rate limiting:** redirectLimiter prevents abuse"
+          },
+          "response": [
+            {
+              "name": "Follow Short URL",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/{{short_code}}",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "{{short_code}}"
+                  ]
+                }
+              },
+              "status": "Not Found",
+              "code": 404,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "content-security-policy",
+                  "value": "default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';img-src 'self' data:;object-src 'none';script-src 'self';script-src-attr 'none';style-src 'self' https: 'unsafe-inline';upgrade-insecure-requests"
+                },
+                {
+                  "key": "cross-origin-opener-policy",
+                  "value": "same-origin"
+                },
+                {
+                  "key": "cross-origin-resource-policy",
+                  "value": "same-origin"
+                },
+                {
+                  "key": "origin-agent-cluster",
+                  "value": "?1"
+                },
+                {
+                  "key": "referrer-policy",
+                  "value": "no-referrer"
+                },
+                {
+                  "key": "strict-transport-security",
+                  "value": "max-age=15552000; includeSubDomains"
+                },
+                {
+                  "key": "x-content-type-options",
+                  "value": "nosniff"
+                },
+                {
+                  "key": "x-dns-prefetch-control",
+                  "value": "off"
+                },
+                {
+                  "key": "x-download-options",
+                  "value": "noopen"
+                },
+                {
+                  "key": "x-frame-options",
+                  "value": "SAMEORIGIN"
+                },
+                {
+                  "key": "x-permitted-cross-domain-policies",
+                  "value": "none"
+                },
+                {
+                  "key": "x-xss-protection",
+                  "value": "0"
+                },
+                {
+                  "key": "vary",
+                  "value": "Origin, Accept-Encoding"
+                },
+                {
+                  "key": "access-control-allow-credentials",
+                  "value": "true"
+                },
+                {
+                  "key": "ratelimit-policy",
+                  "value": "300;w=60"
+                },
+                {
+                  "key": "ratelimit-limit",
+                  "value": "300"
+                },
+                {
+                  "key": "ratelimit-remaining",
+                  "value": "299"
+                },
+                {
+                  "key": "ratelimit-reset",
+                  "value": "60"
+                },
+                {
+                  "key": "content-type",
+                  "value": "application/json; charset=utf-8"
+                },
+                {
+                  "key": "content-length",
+                  "value": "58"
+                },
+                {
+                  "key": "etag",
+                  "value": "W/\"3a-Bjtu+EpqJUCZ0nSlIVX6m/5pGdU\""
+                },
+                {
+                  "key": "date",
+                  "value": "Wed, 02 Sep 2026 13:57:07 GMT"
+                },
+                {
+                  "key": "connection",
+                  "value": "keep-alive"
+                },
+                {
+                  "key": "keep-alive",
+                  "value": "timeout=5"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": \"Short URL not found or expired\"\n}"
+            },
+            {
+              "name": "Follow Short URL",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/{{short_code}}",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "{{short_code}}"
+                  ]
+                }
+              },
+              "status": "Not Found",
+              "code": 404,
+              "_postman_previewlanguage": "html",
+              "header": [
+                {
+                  "key": "date",
+                  "value": "Wed, 02 Sep 2026 13:57:46 GMT"
+                },
+                {
+                  "key": "content-type",
+                  "value": "text/html"
+                },
+                {
+                  "key": "transfer-encoding",
+                  "value": "chunked"
+                },
+                {
+                  "key": "connection",
+                  "value": "keep-alive"
+                },
+                {
+                  "key": "server",
+                  "value": "cloudflare"
+                },
+                {
+                  "key": "age",
+                  "value": "11484"
+                },
+                {
+                  "key": "cf-cache-status",
+                  "value": "HIT"
+                },
+                {
+                  "key": "content-encoding",
+                  "value": "br"
+                },
+                {
+                  "key": "cf-ray",
+                  "value": "a34d06956d93f321-BOM"
+                }
+              ],
+              "cookie": [],
+              "body": "<!doctype html><html lang=\"en\"><head><title>Example Domain</title><link rel=\"icon\" href=\"data:,\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><style>body{background:#eee;width:60vw;margin:15vh auto;font-family:system-ui,sans-serif}h1{font-size:1.5em}div{opacity:0.8}a:link,a:visited{color:#348}</style></head><body><div><h1>Example Domain</h1><p>This domain is for use in documentation examples without needing permission. Avoid use in operations.</p><p><a href=\"https://iana.org/domains/example\">Learn more</a></p></div></body></html>\n"
+            }
+          ]
+        },
+        {
+          "name": "Follow Non-Existent Short Code",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 404 (not found)', function() {",
+                  "  pm.response.to.have.status(404);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/nonexistent123",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "nonexistent123"
+              ]
+            },
+            "description": "Attempt to follow invalid short code.\n\nReturns 404 Not Found if URL doesn't exist or is soft-deleted."
+          },
+          "response": [
+            {
+              "name": "Follow Non-Existent Short Code",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/nonexistent123",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "nonexistent123"
+                  ]
+                }
+              },
+              "status": "Not Found",
+              "code": 404,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "content-security-policy",
+                  "value": "default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';img-src 'self' data:;object-src 'none';script-src 'self';script-src-attr 'none';style-src 'self' https: 'unsafe-inline';upgrade-insecure-requests"
+                },
+                {
+                  "key": "cross-origin-opener-policy",
+                  "value": "same-origin"
+                },
+                {
+                  "key": "cross-origin-resource-policy",
+                  "value": "same-origin"
+                },
+                {
+                  "key": "origin-agent-cluster",
+                  "value": "?1"
+                },
+                {
+                  "key": "referrer-policy",
+                  "value": "no-referrer"
+                },
+                {
+                  "key": "strict-transport-security",
+                  "value": "max-age=15552000; includeSubDomains"
+                },
+                {
+                  "key": "x-content-type-options",
+                  "value": "nosniff"
+                },
+                {
+                  "key": "x-dns-prefetch-control",
+                  "value": "off"
+                },
+                {
+                  "key": "x-download-options",
+                  "value": "noopen"
+                },
+                {
+                  "key": "x-frame-options",
+                  "value": "SAMEORIGIN"
+                },
+                {
+                  "key": "x-permitted-cross-domain-policies",
+                  "value": "none"
+                },
+                {
+                  "key": "x-xss-protection",
+                  "value": "0"
+                },
+                {
+                  "key": "vary",
+                  "value": "Origin, Accept-Encoding"
+                },
+                {
+                  "key": "access-control-allow-credentials",
+                  "value": "true"
+                },
+                {
+                  "key": "ratelimit-policy",
+                  "value": "300;w=60"
+                },
+                {
+                  "key": "ratelimit-limit",
+                  "value": "300"
+                },
+                {
+                  "key": "ratelimit-remaining",
+                  "value": "297"
+                },
+                {
+                  "key": "ratelimit-reset",
+                  "value": "12"
+                },
+                {
+                  "key": "content-type",
+                  "value": "application/json; charset=utf-8"
+                },
+                {
+                  "key": "content-length",
+                  "value": "58"
+                },
+                {
+                  "key": "etag",
+                  "value": "W/\"3a-Bjtu+EpqJUCZ0nSlIVX6m/5pGdU\""
+                },
+                {
+                  "key": "date",
+                  "value": "Wed, 02 Sep 2026 13:57:55 GMT"
+                },
+                {
+                  "key": "connection",
+                  "value": "keep-alive"
+                },
+                {
+                  "key": "keep-alive",
+                  "value": "timeout=5"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": \"Short URL not found or expired\"\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Error Scenarios & Validation",
+      "item": [
+        {
+          "name": "Invalid Email Format",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Returns 400 for invalid email', function() {",
+                  "  pm.response.to.have.status(400);",
+                  "});",
+                  "",
+                  "const res = pm.response.json();",
+                  "pm.test('Error message indicates validation failure', function() {",
+                  "  pm.expect(res.success).to.be.false;",
+                  "  pm.expect(res.error).to.be.a('string');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"not-an-email\",\n  \"password\": \"SecurePass123!\",\n  \"name\": \"Test\"\n}"
+            },
+            "url": {
+              "raw": "{{api_url}}/auth/register",
+              "host": [
+                "{{api_url}}"
+              ],
+              "path": [
+                "auth",
+                "register"
+              ]
+            },
+            "description": "Validation: Email format validation."
+          },
+          "response": [
+            {
+              "name": "Invalid Email Format",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"not-an-email\",\n  \"password\": \"SecurePass123!\",\n  \"name\": \"Test\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "text"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{api_url}}/auth/register",
+                  "host": [
+                    "{{api_url}}"
+                  ],
+                  "path": [
+                    "auth",
+                    "register"
+                  ]
+                }
+              },
+              "status": "Bad Request",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "content-security-policy",
+                  "value": "default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';img-src 'self' data:;object-src 'none';script-src 'self';script-src-attr 'none';style-src 'self' https: 'unsafe-inline';upgrade-insecure-requests"
+                },
+                {
+                  "key": "cross-origin-opener-policy",
+                  "value": "same-origin"
+                },
+                {
+                  "key": "cross-origin-resource-policy",
+                  "value": "same-origin"
+                },
+                {
+                  "key": "origin-agent-cluster",
+                  "value": "?1"
+                },
+                {
+                  "key": "referrer-policy",
+                  "value": "no-referrer"
+                },
+                {
+                  "key": "strict-transport-security",
+                  "value": "max-age=15552000; includeSubDomains"
+                },
+                {
+                  "key": "x-content-type-options",
+                  "value": "nosniff"
+                },
+                {
+                  "key": "x-dns-prefetch-control",
+                  "value": "off"
+                },
+                {
+                  "key": "x-download-options",
+                  "value": "noopen"
+                },
+                {
+                  "key": "x-frame-options",
+                  "value": "SAMEORIGIN"
+                },
+                {
+                  "key": "x-permitted-cross-domain-policies",
+                  "value": "none"
+                },
+                {
+                  "key": "x-xss-protection",
+                  "value": "0"
+                },
+                {
+                  "key": "vary",
+                  "value": "Origin, Accept-Encoding"
+                },
+                {
+                  "key": "access-control-allow-credentials",
+                  "value": "true"
+                },
+                {
+                  "key": "ratelimit-policy",
+                  "value": "10;w=900"
+                },
+                {
+                  "key": "ratelimit-limit",
+                  "value": "10"
+                },
+                {
+                  "key": "ratelimit-remaining",
+                  "value": "7"
+                },
+                {
+                  "key": "ratelimit-reset",
+                  "value": "657"
+                },
+                {
+                  "key": "content-type",
+                  "value": "application/json; charset=utf-8"
+                },
+                {
+                  "key": "content-length",
+                  "value": "91"
+                },
+                {
+                  "key": "etag",
+                  "value": "W/\"5b-UXG5xTMBKVEProdqCnFsWEYO340\""
+                },
+                {
+                  "key": "date",
+                  "value": "Wed, 02 Sep 2026 13:58:04 GMT"
+                },
+                {
+                  "key": "connection",
+                  "value": "keep-alive"
+                },
+                {
+                  "key": "keep-alive",
+                  "value": "timeout=5"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": \"Validation failed\",\n  \"details\": [\n    \"\\\"email\\\" must be a valid email\"\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Weak Password",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Returns 400 for weak password', function() {",
+                  "  pm.response.to.have.status(400);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\",\n  \"password\": \"123\",\n  \"name\": \"Test\"\n}"
+            },
+            "url": {
+              "raw": "{{api_url}}/auth/register",
+              "host": [
+                "{{api_url}}"
+              ],
+              "path": [
+                "auth",
+                "register"
+              ]
+            },
+            "description": "Validation: Password strength requirements."
+          },
+          "response": [
+            {
+              "name": "Weak Password",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"user@example.com\",\n  \"password\": \"123\",\n  \"name\": \"Test\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "text"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{api_url}}/auth/register",
+                  "host": [
+                    "{{api_url}}"
+                  ],
+                  "path": [
+                    "auth",
+                    "register"
+                  ]
+                }
+              },
+              "status": "Bad Request",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "content-security-policy",
+                  "value": "default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';img-src 'self' data:;object-src 'none';script-src 'self';script-src-attr 'none';style-src 'self' https: 'unsafe-inline';upgrade-insecure-requests"
+                },
+                {
+                  "key": "cross-origin-opener-policy",
+                  "value": "same-origin"
+                },
+                {
+                  "key": "cross-origin-resource-policy",
+                  "value": "same-origin"
+                },
+                {
+                  "key": "origin-agent-cluster",
+                  "value": "?1"
+                },
+                {
+                  "key": "referrer-policy",
+                  "value": "no-referrer"
+                },
+                {
+                  "key": "strict-transport-security",
+                  "value": "max-age=15552000; includeSubDomains"
+                },
+                {
+                  "key": "x-content-type-options",
+                  "value": "nosniff"
+                },
+                {
+                  "key": "x-dns-prefetch-control",
+                  "value": "off"
+                },
+                {
+                  "key": "x-download-options",
+                  "value": "noopen"
+                },
+                {
+                  "key": "x-frame-options",
+                  "value": "SAMEORIGIN"
+                },
+                {
+                  "key": "x-permitted-cross-domain-policies",
+                  "value": "none"
+                },
+                {
+                  "key": "x-xss-protection",
+                  "value": "0"
+                },
+                {
+                  "key": "vary",
+                  "value": "Origin, Accept-Encoding"
+                },
+                {
+                  "key": "access-control-allow-credentials",
+                  "value": "true"
+                },
+                {
+                  "key": "ratelimit-policy",
+                  "value": "10;w=900"
+                },
+                {
+                  "key": "ratelimit-limit",
+                  "value": "10"
+                },
+                {
+                  "key": "ratelimit-remaining",
+                  "value": "6"
+                },
+                {
+                  "key": "ratelimit-reset",
+                  "value": "649"
+                },
+                {
+                  "key": "content-type",
+                  "value": "application/json; charset=utf-8"
+                },
+                {
+                  "key": "content-length",
+                  "value": "114"
+                },
+                {
+                  "key": "etag",
+                  "value": "W/\"72-iSNgEEKxfrJFwT43oQ+HJLR4yss\""
+                },
+                {
+                  "key": "date",
+                  "value": "Wed, 02 Sep 2026 13:58:13 GMT"
+                },
+                {
+                  "key": "connection",
+                  "value": "keep-alive"
+                },
+                {
+                  "key": "keep-alive",
+                  "value": "timeout=5"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": \"Validation failed\",\n  \"details\": [\n    \"\\\"password\\\" length must be at least 8 characters long\"\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Duplicate Email",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Returns 409 for duplicate email', function() {",
+                  "  pm.response.to.have.status(409);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\",\n  \"password\": \"SecurePass123!\",\n  \"name\": \"Test\"\n}"
+            },
+            "url": {
+              "raw": "{{api_url}}/auth/register",
+              "host": [
+                "{{api_url}}"
+              ],
+              "path": [
+                "auth",
+                "register"
+              ]
+            },
+            "description": "Validation: Email uniqueness constraint."
+          },
+          "response": [
+            {
+              "name": "Duplicate Email",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"user@example.com\",\n  \"password\": \"SecurePass123!\",\n  \"name\": \"Test\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "text"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{api_url}}/auth/register",
+                  "host": [
+                    "{{api_url}}"
+                  ],
+                  "path": [
+                    "auth",
+                    "register"
+                  ]
+                }
+              },
+              "status": "Conflict",
+              "code": 409,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "content-security-policy",
+                  "value": "default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';img-src 'self' data:;object-src 'none';script-src 'self';script-src-attr 'none';style-src 'self' https: 'unsafe-inline';upgrade-insecure-requests"
+                },
+                {
+                  "key": "cross-origin-opener-policy",
+                  "value": "same-origin"
+                },
+                {
+                  "key": "cross-origin-resource-policy",
+                  "value": "same-origin"
+                },
+                {
+                  "key": "origin-agent-cluster",
+                  "value": "?1"
+                },
+                {
+                  "key": "referrer-policy",
+                  "value": "no-referrer"
+                },
+                {
+                  "key": "strict-transport-security",
+                  "value": "max-age=15552000; includeSubDomains"
+                },
+                {
+                  "key": "x-content-type-options",
+                  "value": "nosniff"
+                },
+                {
+                  "key": "x-dns-prefetch-control",
+                  "value": "off"
+                },
+                {
+                  "key": "x-download-options",
+                  "value": "noopen"
+                },
+                {
+                  "key": "x-frame-options",
+                  "value": "SAMEORIGIN"
+                },
+                {
+                  "key": "x-permitted-cross-domain-policies",
+                  "value": "none"
+                },
+                {
+                  "key": "x-xss-protection",
+                  "value": "0"
+                },
+                {
+                  "key": "vary",
+                  "value": "Origin, Accept-Encoding"
+                },
+                {
+                  "key": "access-control-allow-credentials",
+                  "value": "true"
+                },
+                {
+                  "key": "ratelimit-policy",
+                  "value": "10;w=900"
+                },
+                {
+                  "key": "ratelimit-limit",
+                  "value": "10"
+                },
+                {
+                  "key": "ratelimit-remaining",
+                  "value": "5"
+                },
+                {
+                  "key": "ratelimit-reset",
+                  "value": "642"
+                },
+                {
+                  "key": "content-type",
+                  "value": "application/json; charset=utf-8"
+                },
+                {
+                  "key": "content-length",
+                  "value": "52"
+                },
+                {
+                  "key": "etag",
+                  "value": "W/\"34-0TWfJTfDPCpuJoYot9Wk3JbQcLM\""
+                },
+                {
+                  "key": "date",
+                  "value": "Wed, 02 Sep 2026 13:58:20 GMT"
+                },
+                {
+                  "key": "connection",
+                  "value": "keep-alive"
+                },
+                {
+                  "key": "keep-alive",
+                  "value": "timeout=5"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": \"Email already registered\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Unauthorized (Missing Token)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Returns 401 for missing auth', function() {",
+                  "  pm.response.to.have.status(401);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{api_url}}/urls",
+              "host": [
+                "{{api_url}}"
+              ],
+              "path": [
+                "urls"
+              ]
+            },
+            "description": "Auth validation: Missing JWT token or API key."
+          },
+          "response": [
+            {
+              "name": "Unauthorized (Missing Token)",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{api_url}}/urls",
+                  "host": [
+                    "{{api_url}}"
+                  ],
+                  "path": [
+                    "urls"
+                  ]
+                }
+              },
+              "status": "Unauthorized",
+              "code": 401,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "content-security-policy",
+                  "value": "default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';img-src 'self' data:;object-src 'none';script-src 'self';script-src-attr 'none';style-src 'self' https: 'unsafe-inline';upgrade-insecure-requests"
+                },
+                {
+                  "key": "cross-origin-opener-policy",
+                  "value": "same-origin"
+                },
+                {
+                  "key": "cross-origin-resource-policy",
+                  "value": "same-origin"
+                },
+                {
+                  "key": "origin-agent-cluster",
+                  "value": "?1"
+                },
+                {
+                  "key": "referrer-policy",
+                  "value": "no-referrer"
+                },
+                {
+                  "key": "strict-transport-security",
+                  "value": "max-age=15552000; includeSubDomains"
+                },
+                {
+                  "key": "x-content-type-options",
+                  "value": "nosniff"
+                },
+                {
+                  "key": "x-dns-prefetch-control",
+                  "value": "off"
+                },
+                {
+                  "key": "x-download-options",
+                  "value": "noopen"
+                },
+                {
+                  "key": "x-frame-options",
+                  "value": "SAMEORIGIN"
+                },
+                {
+                  "key": "x-permitted-cross-domain-policies",
+                  "value": "none"
+                },
+                {
+                  "key": "x-xss-protection",
+                  "value": "0"
+                },
+                {
+                  "key": "vary",
+                  "value": "Origin, Accept-Encoding"
+                },
+                {
+                  "key": "access-control-allow-credentials",
+                  "value": "true"
+                },
+                {
+                  "key": "content-type",
+                  "value": "application/json; charset=utf-8"
+                },
+                {
+                  "key": "content-length",
+                  "value": "51"
+                },
+                {
+                  "key": "etag",
+                  "value": "W/\"33-0/FzgJhDfvvOh0glvuqpMLtfaOU\""
+                },
+                {
+                  "key": "date",
+                  "value": "Wed, 02 Sep 2026 13:58:28 GMT"
+                },
+                {
+                  "key": "connection",
+                  "value": "keep-alive"
+                },
+                {
+                  "key": "keep-alive",
+                  "value": "timeout=5"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": \"Authentication required\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Forbidden (Wrong Owner)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Returns 403 for non-owner delete', function() {",
+                  "  pm.response.to.have.status(403);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{api_url}}/urls/someone-elses-url",
+              "host": [
+                "{{api_url}}"
+              ],
+              "path": [
+                "urls",
+                "someone-elses-url"
+              ]
+            },
+            "description": "Authorization: User can only delete their own URLs."
+          },
+          "response": [
+            {
+              "name": "Forbidden (Wrong Owner)",
+              "originalRequest": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{jwt_token}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{api_url}}/urls/someone-elses-url",
+                  "host": [
+                    "{{api_url}}"
+                  ],
+                  "path": [
+                    "urls",
+                    "someone-elses-url"
+                  ]
+                }
+              },
+              "status": "Not Found",
+              "code": 404,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "content-security-policy",
+                  "value": "default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';img-src 'self' data:;object-src 'none';script-src 'self';script-src-attr 'none';style-src 'self' https: 'unsafe-inline';upgrade-insecure-requests"
+                },
+                {
+                  "key": "cross-origin-opener-policy",
+                  "value": "same-origin"
+                },
+                {
+                  "key": "cross-origin-resource-policy",
+                  "value": "same-origin"
+                },
+                {
+                  "key": "origin-agent-cluster",
+                  "value": "?1"
+                },
+                {
+                  "key": "referrer-policy",
+                  "value": "no-referrer"
+                },
+                {
+                  "key": "strict-transport-security",
+                  "value": "max-age=15552000; includeSubDomains"
+                },
+                {
+                  "key": "x-content-type-options",
+                  "value": "nosniff"
+                },
+                {
+                  "key": "x-dns-prefetch-control",
+                  "value": "off"
+                },
+                {
+                  "key": "x-download-options",
+                  "value": "noopen"
+                },
+                {
+                  "key": "x-frame-options",
+                  "value": "SAMEORIGIN"
+                },
+                {
+                  "key": "x-permitted-cross-domain-policies",
+                  "value": "none"
+                },
+                {
+                  "key": "x-xss-protection",
+                  "value": "0"
+                },
+                {
+                  "key": "vary",
+                  "value": "Origin, Accept-Encoding"
+                },
+                {
+                  "key": "access-control-allow-credentials",
+                  "value": "true"
+                },
+                {
+                  "key": "content-type",
+                  "value": "application/json; charset=utf-8"
+                },
+                {
+                  "key": "content-length",
+                  "value": "61"
+                },
+                {
+                  "key": "etag",
+                  "value": "W/\"3d-u2GuaQWVhk/N1pgP+siAbS03QBg\""
+                },
+                {
+                  "key": "date",
+                  "value": "Wed, 02 Sep 2026 13:58:35 GMT"
+                },
+                {
+                  "key": "connection",
+                  "value": "keep-alive"
+                },
+                {
+                  "key": "keep-alive",
+                  "value": "timeout=5"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": \"URL not found or not owned by you\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Invalid URL",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Returns 400 for invalid URL', function() {",
+                  "  pm.response.to.have.status(400);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"original_url\": \"not-a-url\"\n}"
+            },
+            "url": {
+              "raw": "{{api_url}}/urls",
+              "host": [
+                "{{api_url}}"
+              ],
+              "path": [
+                "urls"
+              ]
+            },
+            "description": "Validation: URL format validation."
+          },
+          "response": [
+            {
+              "name": "Invalid URL",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{jwt_token}}"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"original_url\": \"not-a-url\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "text"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{api_url}}/urls",
+                  "host": [
+                    "{{api_url}}"
+                  ],
+                  "path": [
+                    "urls"
+                  ]
+                }
+              },
+              "status": "Bad Request",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "content-security-policy",
+                  "value": "default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';img-src 'self' data:;object-src 'none';script-src 'self';script-src-attr 'none';style-src 'self' https: 'unsafe-inline';upgrade-insecure-requests"
+                },
+                {
+                  "key": "cross-origin-opener-policy",
+                  "value": "same-origin"
+                },
+                {
+                  "key": "cross-origin-resource-policy",
+                  "value": "same-origin"
+                },
+                {
+                  "key": "origin-agent-cluster",
+                  "value": "?1"
+                },
+                {
+                  "key": "referrer-policy",
+                  "value": "no-referrer"
+                },
+                {
+                  "key": "strict-transport-security",
+                  "value": "max-age=15552000; includeSubDomains"
+                },
+                {
+                  "key": "x-content-type-options",
+                  "value": "nosniff"
+                },
+                {
+                  "key": "x-dns-prefetch-control",
+                  "value": "off"
+                },
+                {
+                  "key": "x-download-options",
+                  "value": "noopen"
+                },
+                {
+                  "key": "x-frame-options",
+                  "value": "SAMEORIGIN"
+                },
+                {
+                  "key": "x-permitted-cross-domain-policies",
+                  "value": "none"
+                },
+                {
+                  "key": "x-xss-protection",
+                  "value": "0"
+                },
+                {
+                  "key": "vary",
+                  "value": "Origin, Accept-Encoding"
+                },
+                {
+                  "key": "access-control-allow-credentials",
+                  "value": "true"
+                },
+                {
+                  "key": "ratelimit-policy",
+                  "value": "100;w=900"
+                },
+                {
+                  "key": "ratelimit-limit",
+                  "value": "100"
+                },
+                {
+                  "key": "ratelimit-remaining",
+                  "value": "94"
+                },
+                {
+                  "key": "ratelimit-reset",
+                  "value": "731"
+                },
+                {
+                  "key": "content-type",
+                  "value": "application/json; charset=utf-8"
+                },
+                {
+                  "key": "content-length",
+                  "value": "142"
+                },
+                {
+                  "key": "etag",
+                  "value": "W/\"8e-KA23Qe77+8t61IRccX82WYLmS8M\""
+                },
+                {
+                  "key": "date",
+                  "value": "Wed, 02 Sep 2026 13:58:42 GMT"
+                },
+                {
+                  "key": "connection",
+                  "value": "keep-alive"
+                },
+                {
+                  "key": "keep-alive",
+                  "value": "timeout=5"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": \"Validation failed\",\n  \"details\": [\n    \"\\\"original_url\\\" must be a valid uri with a scheme matching the http|https pattern\"\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Rate Limit Exceeded",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Returns 429 when rate limit exceeded', function() {",
+                  "  pm.response.to.have.status(429);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user{{$timestamp}}@example.com\",\n  \"password\": \"SecurePass123!\",\n  \"name\": \"Test\"\n}"
+            },
+            "url": {
+              "raw": "{{api_url}}/auth/register",
+              "host": [
+                "{{api_url}}"
+              ],
+              "path": [
+                "auth",
+                "register"
+              ]
+            },
+            "description": "Rate limiting: authLimiter fires after N requests in time window.\n\nReturns 429 Too Many Requests with Retry-After header."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Suggested Workflows",
+      "item": [
+        {
+          "name": "1. Setup - Register & List URLs",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://www.getpostman.com/collections",
+              "protocol": "https",
+              "host": [
+                "www",
+                "getpostman",
+                "com"
+              ],
+              "path": [
+                "collections"
+              ]
+            },
+            "description": "Run these in order:\n1. Register\n2. Shorten URL (Authenticated) — captures short_code\n3. List My URLs\n\nThis establishes auth context and creates test data."
+          },
+          "response": []
+        },
+        {
+          "name": "2. Hot Path - Create & Follow",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": ""
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "3. Guest Flow",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": ""
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "4. Auth Methods Comparison",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": ""
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "5. Error Handling",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": ""
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "Real-world testing sequences"
+    },
+    {
+      "name": "Analytics & Stats",
+      "item": [
+        {
+          "name": "Dashboard Summary",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function() {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "const res = pm.response.json();",
+                  "",
+                  "pm.test('Response has success flag', function() {",
+                  "  pm.expect(res.success).to.be.true;",
+                  "});",
+                  "",
+                  "pm.test('Dashboard contains aggregated stats', function() {",
+                  "  pm.expect(res.data).to.have.property('total_urls');",
+                  "  pm.expect(res.data).to.have.property('total_clicks');",
+                  "  pm.expect(res.data).to.have.property('top_url_clicks');",
+                  "});",
+                  "",
+                  "pm.test('Stats are non-negative integers', function() {",
+                  "  pm.expect(res.data.total_urls).to.be.a('number');",
+                  "  pm.expect(res.data.total_clicks).to.be.a('number');",
+                  "  pm.expect(res.data.total_urls).to.be.at.least(0);",
+                  "  pm.expect(res.data.total_clicks).to.be.at.least(0);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{api_url}}/analytics/dashboard",
+              "host": [
+                "{{api_url}}"
+              ],
+              "path": [
+                "analytics",
+                "dashboard"
+              ]
+            },
+            "description": "Get aggregated analytics dashboard for authenticated user.\n\n**Returns:**\n- `total_urls`: Total count of short URLs created\n- `total_clicks`: Sum of all clicks across all URLs\n- `top_url_clicks`: Highest click count among all URLs\n\n**Requires:** JWT token or API key auth"
+          },
+          "response": [
+            {
+              "name": "Dashboard Summary",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{jwt_token}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{api_url}}/analytics/dashboard",
+                  "host": [
+                    "{{api_url}}"
+                  ],
+                  "path": [
+                    "analytics",
+                    "dashboard"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "content-security-policy",
+                  "value": "default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';img-src 'self' data:;object-src 'none';script-src 'self';script-src-attr 'none';style-src 'self' https: 'unsafe-inline';upgrade-insecure-requests"
+                },
+                {
+                  "key": "cross-origin-opener-policy",
+                  "value": "same-origin"
+                },
+                {
+                  "key": "cross-origin-resource-policy",
+                  "value": "same-origin"
+                },
+                {
+                  "key": "origin-agent-cluster",
+                  "value": "?1"
+                },
+                {
+                  "key": "referrer-policy",
+                  "value": "no-referrer"
+                },
+                {
+                  "key": "strict-transport-security",
+                  "value": "max-age=15552000; includeSubDomains"
+                },
+                {
+                  "key": "x-content-type-options",
+                  "value": "nosniff"
+                },
+                {
+                  "key": "x-dns-prefetch-control",
+                  "value": "off"
+                },
+                {
+                  "key": "x-download-options",
+                  "value": "noopen"
+                },
+                {
+                  "key": "x-frame-options",
+                  "value": "SAMEORIGIN"
+                },
+                {
+                  "key": "x-permitted-cross-domain-policies",
+                  "value": "none"
+                },
+                {
+                  "key": "x-xss-protection",
+                  "value": "0"
+                },
+                {
+                  "key": "vary",
+                  "value": "Origin, Accept-Encoding"
+                },
+                {
+                  "key": "access-control-allow-credentials",
+                  "value": "true"
+                },
+                {
+                  "key": "content-type",
+                  "value": "application/json; charset=utf-8"
+                },
+                {
+                  "key": "content-length",
+                  "value": "76"
+                },
+                {
+                  "key": "etag",
+                  "value": "W/\"4c-dps2JU9jOmNJCuJls5b/xQtBNYY\""
+                },
+                {
+                  "key": "date",
+                  "value": "Wed, 02 Sep 2026 13:58:54 GMT"
+                },
+                {
+                  "key": "connection",
+                  "value": "keep-alive"
+                },
+                {
+                  "key": "keep-alive",
+                  "value": "timeout=5"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"total_urls\": 0,\n    \"total_clicks\": 0,\n    \"top_url_clicks\": 0\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "URL Stats (Last 30 Days)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function() {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "const res = pm.response.json();",
+                  "",
+                  "pm.test('Response has success flag', function() {",
+                  "  pm.expect(res.success).to.be.true;",
+                  "});",
+                  "",
+                  "pm.test('Stats include required fields', function() {",
+                  "  pm.expect(res.data).to.have.property('short_code');",
+                  "  pm.expect(res.data).to.have.property('period_days');",
+                  "  pm.expect(res.data).to.have.property('total_clicks');",
+                  "  pm.expect(res.data).to.have.property('unique_clicks');",
+                  "  pm.expect(res.data).to.have.property('daily');",
+                  "  pm.expect(res.data).to.have.property('top_referers');",
+                  "  pm.expect(res.data).to.have.property('top_countries');",
+                  "});",
+                  "",
+                  "pm.test('Daily breakdown is array', function() {",
+                  "  pm.expect(res.data.daily).to.be.an('array');",
+                  "});",
+                  "",
+                  "pm.test('Top referers limited to 10', function() {",
+                  "  pm.expect(res.data.top_referers).to.be.an('array');",
+                  "  pm.expect(res.data.top_referers.length).to.be.at.most(10);",
+                  "});",
+                  "",
+                  "pm.test('Top countries limited to 10', function() {",
+                  "  pm.expect(res.data.top_countries).to.be.an('array');",
+                  "  pm.expect(res.data.top_countries.length).to.be.at.most(10);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{api_url}}/analytics/urls/{{short_code}}?days=30",
+              "host": [
+                "{{api_url}}"
+              ],
+              "path": [
+                "analytics",
+                "urls",
+                "{{short_code}}"
+              ],
+              "query": [
+                {
+                  "key": "days",
+                  "value": "30",
+                  "description": "Number of days (1-365, default 30)"
+                }
+              ]
+            },
+            "description": "Get detailed analytics for a specific short URL.\n\n**Path Parameters:**\n- `short_code`: The short code of the URL (e.g., `abc123`)\n\n**Query Parameters:**\n- `days`: Number of days to analyze (1-365, default 30)\n\n**Returns:**\n- `short_code`: The URL's short code\n- `period_days`: Number of days analyzed\n- `total_clicks`: Total clicks in period\n- `unique_clicks`: Unique visitor IPs\n- `daily`: Array of daily click counts with dates\n- `top_referers`: Top 10 HTTP referrers\n- `top_countries`: Top 10 countries by click source\n\n**Requires:** JWT token or API key auth (owner only)"
+          },
+          "response": [
+            {
+              "name": "URL Stats (Last 30 Days)",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{jwt_token}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{api_url}}/analytics/urls/{{short_code}}?days=30",
+                  "host": [
+                    "{{api_url}}"
+                  ],
+                  "path": [
+                    "analytics",
+                    "urls",
+                    "{{short_code}}"
+                  ],
+                  "query": [
+                    {
+                      "key": "days",
+                      "value": "30",
+                      "description": "Number of days (1-365, default 30)"
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "content-security-policy",
+                  "value": "default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';img-src 'self' data:;object-src 'none';script-src 'self';script-src-attr 'none';style-src 'self' https: 'unsafe-inline';upgrade-insecure-requests"
+                },
+                {
+                  "key": "cross-origin-opener-policy",
+                  "value": "same-origin"
+                },
+                {
+                  "key": "cross-origin-resource-policy",
+                  "value": "same-origin"
+                },
+                {
+                  "key": "origin-agent-cluster",
+                  "value": "?1"
+                },
+                {
+                  "key": "referrer-policy",
+                  "value": "no-referrer"
+                },
+                {
+                  "key": "strict-transport-security",
+                  "value": "max-age=15552000; includeSubDomains"
+                },
+                {
+                  "key": "x-content-type-options",
+                  "value": "nosniff"
+                },
+                {
+                  "key": "x-dns-prefetch-control",
+                  "value": "off"
+                },
+                {
+                  "key": "x-download-options",
+                  "value": "noopen"
+                },
+                {
+                  "key": "x-frame-options",
+                  "value": "SAMEORIGIN"
+                },
+                {
+                  "key": "x-permitted-cross-domain-policies",
+                  "value": "none"
+                },
+                {
+                  "key": "x-xss-protection",
+                  "value": "0"
+                },
+                {
+                  "key": "vary",
+                  "value": "Origin, Accept-Encoding"
+                },
+                {
+                  "key": "access-control-allow-credentials",
+                  "value": "true"
+                },
+                {
+                  "key": "content-type",
+                  "value": "application/json; charset=utf-8"
+                },
+                {
+                  "key": "content-length",
+                  "value": "148"
+                },
+                {
+                  "key": "etag",
+                  "value": "W/\"94-9G9x++EGnmRV+rdfJeQEAW7blsU\""
+                },
+                {
+                  "key": "date",
+                  "value": "Wed, 02 Sep 2026 13:59:01 GMT"
+                },
+                {
+                  "key": "connection",
+                  "value": "keep-alive"
+                },
+                {
+                  "key": "keep-alive",
+                  "value": "timeout=5"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"short_code\": \"000000c\",\n    \"period_days\": 30,\n    \"total_clicks\": 0,\n    \"unique_clicks\": 0,\n    \"daily\": [],\n    \"top_referers\": [],\n    \"top_countries\": []\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "URL Stats (Custom Period)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function() {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "const res = pm.response.json();",
+                  "",
+                  "pm.test('Respects custom days parameter', function() {",
+                  "  pm.expect(res.data.period_days).to.equal(90);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{api_url}}/analytics/urls/{{short_code}}?days=90",
+              "host": [
+                "{{api_url}}"
+              ],
+              "path": [
+                "analytics",
+                "urls",
+                "{{short_code}}"
+              ],
+              "query": [
+                {
+                  "key": "days",
+                  "value": "90",
+                  "description": "Extended period (90 days)"
+                }
+              ]
+            },
+            "description": "Get analytics for a custom time period (90 days example).\n\nUse `days` query parameter to analyze different periods:\n- `days=7` — Last week\n- `days=30` — Last month\n- `days=90` — Last quarter\n- `days=365` — Last year\n\nMaximum is capped at 365 days."
+          },
+          "response": [
+            {
+              "name": "URL Stats (Custom Period)",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{jwt_token}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{api_url}}/analytics/urls/{{short_code}}?days=90",
+                  "host": [
+                    "{{api_url}}"
+                  ],
+                  "path": [
+                    "analytics",
+                    "urls",
+                    "{{short_code}}"
+                  ],
+                  "query": [
+                    {
+                      "key": "days",
+                      "value": "90",
+                      "description": "Extended period (90 days)"
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "content-security-policy",
+                  "value": "default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';img-src 'self' data:;object-src 'none';script-src 'self';script-src-attr 'none';style-src 'self' https: 'unsafe-inline';upgrade-insecure-requests"
+                },
+                {
+                  "key": "cross-origin-opener-policy",
+                  "value": "same-origin"
+                },
+                {
+                  "key": "cross-origin-resource-policy",
+                  "value": "same-origin"
+                },
+                {
+                  "key": "origin-agent-cluster",
+                  "value": "?1"
+                },
+                {
+                  "key": "referrer-policy",
+                  "value": "no-referrer"
+                },
+                {
+                  "key": "strict-transport-security",
+                  "value": "max-age=15552000; includeSubDomains"
+                },
+                {
+                  "key": "x-content-type-options",
+                  "value": "nosniff"
+                },
+                {
+                  "key": "x-dns-prefetch-control",
+                  "value": "off"
+                },
+                {
+                  "key": "x-download-options",
+                  "value": "noopen"
+                },
+                {
+                  "key": "x-frame-options",
+                  "value": "SAMEORIGIN"
+                },
+                {
+                  "key": "x-permitted-cross-domain-policies",
+                  "value": "none"
+                },
+                {
+                  "key": "x-xss-protection",
+                  "value": "0"
+                },
+                {
+                  "key": "vary",
+                  "value": "Origin, Accept-Encoding"
+                },
+                {
+                  "key": "access-control-allow-credentials",
+                  "value": "true"
+                },
+                {
+                  "key": "content-type",
+                  "value": "application/json; charset=utf-8"
+                },
+                {
+                  "key": "content-length",
+                  "value": "148"
+                },
+                {
+                  "key": "etag",
+                  "value": "W/\"94-zkOLCgau2pXiZSCTARJnZ6fzBMs\""
+                },
+                {
+                  "key": "date",
+                  "value": "Wed, 02 Sep 2026 13:59:11 GMT"
+                },
+                {
+                  "key": "connection",
+                  "value": "keep-alive"
+                },
+                {
+                  "key": "keep-alive",
+                  "value": "timeout=5"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"short_code\": \"000000c\",\n    \"period_days\": 90,\n    \"total_clicks\": 0,\n    \"unique_clicks\": 0,\n    \"daily\": [],\n    \"top_referers\": [],\n    \"top_countries\": []\n  }\n}"
+            }
+          ]
+        }
+      ],
+      "description": "Endpoints for retrieving URL analytics and usage statistics."
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost"
+    },
+    {
+      "key": "api_url",
+      "value": "http://localhost/api/v1"
+    },
+    {
+      "key": "jwt_token",
+      "value": ""
+    },
+    {
+      "key": "api_key",
+      "value": ""
+    },
+    {
+      "key": "short_code",
+      "value": ""
+    },
+    {
+      "key": "user_id",
+      "value": ""
+    },
+    {
+      "key": "original_url",
+      "value": "https://www.example.com/some/very/long/url"
+    }
+  ]
+}

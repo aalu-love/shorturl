@@ -1,0 +1,14 @@
+{
+  "id": "gf_mq21rwewn13cp804v",
+  "name": "gf",
+  "requests": [],
+  "config": {
+    "iterations": 1,
+    "delayBetweenRequests": 0,
+    "stopOnError": false,
+    "readFromSharedSession": false,
+    "writeToSharedSession": false
+  },
+  "createdAt": 1780731864536,
+  "updatedAt": 1780731864536
+}

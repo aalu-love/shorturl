@@ -1,0 +1,228 @@
+# ── Network ───────────────────────────────────────────────────────────────
+# All services on the same internal network (internal_network_dev) can communicate.
+# Same type of network as production, but with a different name to avoid conflicts if both are running.
+# Only nginx is exposed to the host.
+networks:
+  internal:
+    name: internal_network_dev
+    driver: bridge
+
+# ── Volumes (persistent data) ─────────────────────────────────────────────
+volumes:
+  postgres_primary_data:
+  postgres_replica_data:
+  redis_data:
+  mongodb_data:
+
+services:
+  # ── Nginx — reverse proxy & load balancer ─────────────────────────────
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: url_nginx_dev
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx/nginx.dev.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - internal
+    restart: unless-stopped
+
+  # ── Client — Vite frontend development server ─────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: development
+    container_name: frontend_dev
+    environment:
+      - NODE_ENV=development
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend/src:/app/src:ro # Mount source code for hot reload
+      - ./frontend/vite.config.ts:/app/vite.config.ts:ro # Mount Vite config for development proxy
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:5173"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  # ── App — Node.js API server ──────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: development
+    container_name: backend_dev
+    env_file: ./backend/.env.dev
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+    networks:
+      - internal
+    restart: unless-stopped
+    # No ports exposed directly — all traffic goes through nginx
+    ports:
+      - "3000:3000" # Expose app port for direct access during development (e.g. testing, debugging)
+    # Copy env file with development variables (e.g. DB credentials, API keys) into the container for development use.
+    # In production, we would inject these via environment variables or a secrets manager instead of copying a file.
+    volumes:
+      - ./backend/.env.dev:/app/.env.dev:ro
+      - ./backend/.env:/app/.env:ro
+      - ./backend/src:/app/src:ro # Mount source code for nodemon file watching
+
+  # ── PostgreSQL Primary (Writes) ───────────────────────────────────────
+  postgres-primary:
+    image: postgres:16-alpine
+    container_name: url_postgres_primary_dev
+    entrypoint: /postgres/entrypoint.sh
+    command:
+      - "-c"
+      - "config_file=/postgres/primary/postgresql.conf"
+      - "-c"
+      - "hba_file=/postgres/primary/pg_hba.conf"
+      - "-c"
+      - "wal_level=replica"
+      - "-c"
+      - "max_wal_senders=10"
+      - "-c"
+      - "max_replication_slots=10"
+      - "-c"
+      - "wal_keep_size=64"
+      - "-c"
+      - "hot_standby=on"
+    environment:
+      DEVELOPMENT: true
+      POSTGRES_DB: urlshortener
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres_secret
+      # Enable WAL for replication
+      POSTGRES_INITDB_ARGS: -c wal_level=replica -c max_wal_senders=10 -c max_replication_slots=10 -c wal_keep_size=64 -c hot_standby=on
+    volumes:
+      - postgres_primary_data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro # Runs schema + seed on first start
+      - ./postgres/entrypoint.sh:/postgres/entrypoint.sh:ro # Custom entrypoint for smart initialization
+      - ./postgres/primary/postgresql.conf:/postgres/primary/postgresql.conf:ro
+      - ./postgres/primary/pg_hba.conf:/postgres/primary/pg_hba.conf:ro
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d urlshortener"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    ports:
+      - "5432:5432" # Expose primary for direct access (e.g. admin tools) during development
+    # No ports exposed — app connects directly via internal network
+
+  # ── PostgreSQL Replica (Reads) ────────────────────────────────────────
+  # In this dev setup, replica points to the same data as primary.
+  # In production: configure pg_basebackup + streaming replication.
+  # The app already routes all reads here — replica is production-ready to swap in.
+  postgres-replica:
+    image: postgres:16-alpine
+    container_name: url_postgres_replica_dev
+    entrypoint: /postgres/entrypoint.sh
+    environment:
+      DEVELOPMENT: true
+      POSTGRES_DB: urlshortener
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres_secret
+      REPLICA_MODE: "true"
+      PRIMARY_HOST: postgres-primary
+      PRIMARY_PORT: "5432"
+      PRIMARY_USER: repuser
+      PRIMARY_PASSWORD: password
+    command:
+      - "-c"
+      - "config_file=/postgres/replica/postgresql.conf"
+      - "-c"
+      - "hba_file=/postgres/replica/pg_hba.conf"
+      - "-c"
+      - "hot_standby=on"
+      - "-c"
+      - "primary_conninfo=host=postgres-primary port=5432 user=repuser password=password"
+    volumes:
+      - postgres_replica_data:/var/lib/postgresql/data
+      - ./postgres/entrypoint.sh:/postgres/entrypoint.sh:ro # Custom entrypoint for smart initialization
+      - ./postgres/replica/postgresql.conf:/postgres/replica/postgresql.conf:ro
+      - ./postgres/replica/pg_hba.conf:/postgres/replica/pg_hba.conf:ro
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d urlshortener"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+    ports:
+      - "5433:5432" # Expose replica on a different port for direct access during development (e.g. testing, debugging)
+    # No ports exposed — app connects directly via internal network
+
+  # ── Redis — LFU Cache ─────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: url_redis_dev
+    command: >
+      redis-server
+      --requirepass redis_secret
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lfu
+      --appendonly yes
+      --appendfsync everysec
+    # LFU eviction: keeps most-frequently-visited URLs in memory.
+    # allkeys-lfu = evict the least-frequently used key across ALL keys.
+    # appendonly + everysec = persist to disk, flush every second (durability vs speed balance).
+    volumes:
+      - redis_data:/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "redis_secret", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    ports:
+      - "6666:6379" # Expose Redis for direct access during development (e.g. testing, debugging)
+    # No ports exposed — app connects directly via internal network
+
+  # ── MongoDB — Analytics Data Store ────────────────────────────────────
+  mongodb:
+    image: mongo
+    container_name: url_mongodb_dev
+    environment:
+      MONGO_INITDB_DATABASE: url_shortener
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: example
+    command: >
+      mongod
+      --wiredTigerCacheSizeGB=0.5
+      --oplogSize=128
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    ports:
+      - "27017:27017" # Expose MongoDB for direct access during development (e.g. testing, debugging)

@@ -1,0 +1,17 @@
+// Global application styles (SCSS layer)
+//
+// Tailwind directives and CSS custom properties live in src/index.css.
+// This file is the place for any SCSS-specific additions:
+//   - SCSS variables / mixins
+//   - Global animations
+//   - Component-level overrides that need SCSS features
+//
+// Usage: imported in src/main.tsx alongside index.css
+
+// Example SCSS variable usage:
+// $brand-primary: hsl(0 0% 10%);
+//
+// Example mixin:
+// @mixin focus-ring {
+//   @apply outline-none ring-2 ring-ring ring-offset-2;
+// }
