@@ -3,7 +3,7 @@
 A production-grade bit.ly clone. Built to demonstrate the exact architecture decisions from the system design session.
 
 ## Screenshot
-![image](public\image.png)
+![image](public/image.png)
 
 ## Stack
 
