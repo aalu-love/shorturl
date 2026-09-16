@@ -31,7 +31,7 @@ const {
   closeConnection: closeMongoDB,
 } = require("./config/mongodb");
 
-const PORT = parseInt(process.env.PORT, 10) || 3000;
+const PORT = parseInt(process.env.PORT, 10);
 
 const start = async () => {
   try {
